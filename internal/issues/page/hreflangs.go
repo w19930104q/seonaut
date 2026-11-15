@@ -3,9 +3,11 @@ package page
 import (
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/stjudewashere/seonaut/internal/issues/errors"
 	"github.com/stjudewashere/seonaut/internal/models"
+	"github.com/stjudewashere/seonaut/internal/urlutils"
 
 	"github.com/antchfx/htmlquery"
 	"golang.org/x/net/html"
@@ -28,7 +30,7 @@ func NewHreflangXDefaultMissingReporter() *models.PageIssueReporter {
 		}
 
 		for _, hreflang := range pageReport.Hreflangs {
-			if hreflang.Lang == "x-default" {
+			if strings.EqualFold(models.NormalizeLang(hreflang.Lang), "x-default") {
 				return false
 			}
 		}
@@ -58,8 +60,9 @@ func NewHreflangMissingSelfReference() *models.PageIssueReporter {
 			return false
 		}
 
+		pageURL := urlutils.NormalizeURL(pageReport.URL)
 		for _, hl := range pageReport.Hreflangs {
-			if hl.URL == pageReport.URL {
+			if urlutils.NormalizeURL(hl.URL) == pageURL {
 				return false
 			}
 		}
@@ -89,8 +92,11 @@ func NewHreflangMismatchingLang() *models.PageIssueReporter {
 			return false
 		}
 
+		pageURL := urlutils.NormalizeURL(pageReport.URL)
 		for _, hl := range pageReport.Hreflangs {
-			if hl.URL == pageReport.URL && hl.Lang != "x-default" && hl.Lang != pageReport.Lang {
+			if urlutils.NormalizeURL(hl.URL) == pageURL &&
+				!strings.EqualFold(hl.Lang, "x-default") &&
+				!strings.EqualFold(models.NormalizeLang(hl.Lang), models.NormalizeLang(pageReport.Lang)) {
 				return true
 			}
 		}
@@ -105,7 +111,8 @@ func NewHreflangMismatchingLang() *models.PageIssueReporter {
 }
 
 // Returns a report_manager.PageIssueReporter with a callback function that returns true if
-// the hreflang URLs are relative.
+// the hreflang URLs are relative. Only link tags with a non-empty hreflang attribute
+// are taken into account.
 func NewHreflangRelativeURL() *models.PageIssueReporter {
 	c := func(pageReport *models.PageReport, htmlNode *html.Node, header *http.Header) bool {
 		if !pageReport.Crawled {
@@ -116,12 +123,16 @@ func NewHreflangRelativeURL() *models.PageIssueReporter {
 			return false
 		}
 
-		hreflangs, err := htmlquery.QueryAll(htmlNode, "//head/link[@rel=\"alternate\"]")
+		hreflangs, err := htmlquery.QueryAll(htmlNode, "//head/link[@rel=\"alternate\" and @hreflang]")
 		if err != nil || hreflangs == nil {
 			return false
 		}
 
 		for _, hl := range hreflangs {
+			if models.NormalizeLang(htmlquery.SelectAttr(hl, "hreflang")) == "" {
+				continue
+			}
+
 			parsedURL, err := url.Parse(htmlquery.SelectAttr(hl, "href"))
 			if err != nil {
 				return false

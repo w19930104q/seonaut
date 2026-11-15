@@ -95,15 +95,22 @@ func (p *Parser) canonical() string {
 }
 
 // Returns the document hreflangs.
-// It first looks into the hreflang HTML tags, if empty it returns the hreflangs
-// defined in the HTTP headers.
+// It merges the hreflangs defined in the HTML link tags and the HTTP Link
+// headers, removing duplicates that appear in both sources.
 func (p *Parser) hreflangs() []models.Hreflang {
-	hreflang := p.htmlHreflang()
-	if len(hreflang) == 0 {
-		return p.headersHreflangs()
+	seen := make(map[models.Hreflang]struct{})
+	hreflangs := []models.Hreflang{}
+
+	for _, h := range append(p.htmlHreflang(), p.headersHreflangs()...) {
+		if _, ok := seen[h]; ok {
+			continue
+		}
+
+		seen[h] = struct{}{}
+		hreflangs = append(hreflangs, h)
 	}
 
-	return hreflang
+	return hreflangs
 }
 
 // The lang attribute of the html element defines the document language
@@ -254,18 +261,21 @@ func (p *Parser) htmlHreflang() []models.Hreflang {
 	}
 
 	for _, n := range hl {
-		if htmlquery.ExistsAttr(n, "hreflang") {
-			l, err := urlutils.AbsoluteURL(htmlquery.SelectAttr(n, "href"), p.doc, p.ParsedURL)
-			if err != nil {
-				continue
-			}
-
-			h := models.Hreflang{
-				URL:  l.String(),
-				Lang: htmlquery.SelectAttr(n, "hreflang"),
-			}
-			hreflangs = append(hreflangs, h)
+		lang := models.NormalizeLang(htmlquery.SelectAttr(n, "hreflang"))
+		if lang == "" {
+			continue
 		}
+
+		l, err := urlutils.AbsoluteURL(htmlquery.SelectAttr(n, "href"), p.doc, p.ParsedURL)
+		if err != nil {
+			continue
+		}
+
+		h := models.Hreflang{
+			URL:  urlutils.NormalizeURL(l.String()),
+			Lang: lang,
+		}
+		hreflangs = append(hreflangs, h)
 	}
 
 	return hreflangs
@@ -517,17 +527,20 @@ func (p *Parser) headersCanonical() string {
 	return ""
 }
 
-// Parse hreflang links from the HTTP header
+// Parse hreflang links from the HTTP Link header.
+// Only link elements with a rel="alternate" parameter and a non-empty
+// hreflang parameter are considered. Relative URLs are resolved against
+// the document URL.
 func (p *Parser) headersHreflangs() []models.Hreflang {
 	hreflangs := []models.Hreflang{}
-	linkHeaderElements := strings.Split(p.Headers.Get("Link"), ",")
+	linkHeaderElements := strings.Split(strings.Join(p.Headers.Values("Link"), ","), ",")
 	for _, lh := range linkHeaderElements {
 		attr := strings.Split(lh, ";")
-		if len(attr) < 1 {
+		if len(attr) < 2 {
 			continue
 		}
 
-		url := strings.TrimSpace(attr[0])
+		rawURL := strings.Trim(strings.TrimSpace(attr[0]), "<>")
 		isAlternate := false
 		lang := ""
 		for _, a := range attr[1:] {
@@ -537,18 +550,26 @@ func (p *Parser) headersHreflangs() []models.Hreflang {
 			}
 
 			if strings.HasPrefix(a, "hreflang=") {
-				lang = strings.Trim(a[9:], "\"")
+				lang = strings.Trim(a[len("hreflang="):], "\"")
 			}
 		}
 
-		if isAlternate && lang != "" {
-			h := models.Hreflang{
-				URL:  url[1 : len(url)-1],
-				Lang: lang,
-			}
-
-			hreflangs = append(hreflangs, h)
+		lang = models.NormalizeLang(lang)
+		if !isAlternate || lang == "" {
+			continue
 		}
+
+		u, err := urlutils.AbsoluteURL(rawURL, p.doc, p.ParsedURL)
+		if err != nil {
+			continue
+		}
+
+		h := models.Hreflang{
+			URL:  urlutils.NormalizeURL(u.String()),
+			Lang: lang,
+		}
+
+		hreflangs = append(hreflangs, h)
 	}
 
 	return hreflangs

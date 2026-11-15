@@ -277,3 +277,112 @@ func TestHreflangRelativeURLIssues(t *testing.T) {
 		t.Errorf("HreflangRelativeURL: reportsIssue should be true")
 	}
 }
+
+// Test the HreflangXDefaultMissing reporter with an x-default value using
+// mixed case. Language codes are case-insensitive so it should return false.
+func TestHreflangXDefaultMissingMixedCase(t *testing.T) {
+	pageReport := &models.PageReport{
+		Crawled:    true,
+		MediaType:  "text/html",
+		StatusCode: 200,
+		Hreflangs: []models.Hreflang{
+			{URL: "http://example.com", Lang: "X-Default"},
+			{URL: "http://example.com/en", Lang: "EN"},
+		},
+	}
+
+	reporter := page.NewHreflangXDefaultMissingReporter()
+
+	doc, err := html.Parse(strings.NewReader(""))
+	if err != nil {
+		t.Errorf("HreflangXDefaultMissing: Error parsing html source")
+	}
+
+	if reporter.Callback(pageReport, doc, &http.Header{}) == true {
+		t.Errorf("HreflangXDefaultMissing mixed case: reportsIssue should be false")
+	}
+}
+
+// Test the HreflangMissingSelfReference reporter with a self-referencing
+// hreflang URL that differs from the page URL only in host case.
+// Should return false.
+func TestHreflangMissingSelfReferenceCaseInsensitive(t *testing.T) {
+	pageReport := &models.PageReport{
+		Crawled:    true,
+		MediaType:  "text/html",
+		StatusCode: 200,
+		URL:        "http://example.com/en",
+		Hreflangs: []models.Hreflang{
+			{URL: "http://EXAMPLE.com/en", Lang: "en"},
+			{URL: "http://example.com/fr", Lang: "fr"},
+		},
+	}
+
+	reporter := page.NewHreflangMissingSelfReference()
+
+	doc, err := html.Parse(strings.NewReader(""))
+	if err != nil {
+		t.Errorf("HreflangMissingSelfReference: Error parsing html source")
+	}
+
+	if reporter.Callback(pageReport, doc, &http.Header{}) == true {
+		t.Errorf("HreflangMissingSelfReference case: reportsIssue should be false")
+	}
+}
+
+// Test the HreflangMismatchingLang reporter with a self-referencing hreflang
+// lang that matches the page lang but uses a different case.
+// Should return false.
+func TestHreflangMismatchingLangCaseInsensitive(t *testing.T) {
+	pageReport := &models.PageReport{
+		Crawled:    true,
+		MediaType:  "text/html",
+		Lang:       "en",
+		StatusCode: 200,
+		URL:        "http://example.com",
+		Hreflangs: []models.Hreflang{
+			{URL: "http://example.com", Lang: "EN"},
+		},
+	}
+
+	reporter := page.NewHreflangMismatchingLang()
+
+	doc, err := html.Parse(strings.NewReader(""))
+	if err != nil {
+		t.Errorf("HreflangMismatchingLang: Error parsing html source")
+	}
+
+	if reporter.Callback(pageReport, doc, &http.Header{}) == true {
+		t.Errorf("HreflangMismatchingLang case: reportsIssue should be false")
+	}
+}
+
+// Test the HreflangRelativeURL reporter with a relative rel="alternate" link
+// tag that has no hreflang attribute. It should be ignored and return false.
+func TestHreflangRelativeURLIgnoresMissingHreflang(t *testing.T) {
+	pageReport := &models.PageReport{
+		Crawled:    true,
+		MediaType:  "text/html",
+		StatusCode: 200,
+	}
+
+	reporter := page.NewHreflangRelativeURL()
+
+	source := `
+		<html>
+			<head>
+				<link rel="alternate" href="/feed" />
+				<link rel="alternate" href="http://example.com/en" hreflang="en" />
+			</head>
+		</html>
+	`
+
+	doc, err := html.Parse(strings.NewReader(source))
+	if err != nil {
+		t.Errorf("HreflangRelativeURL: Error parsing html source")
+	}
+
+	if reporter.Callback(pageReport, doc, &http.Header{}) == true {
+		t.Errorf("HreflangRelativeURL without hreflang attr: reportsIssue should be false")
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stjudewashere/seonaut/internal/config"
+	"github.com/stjudewashere/seonaut/internal/urlutils"
 )
 
 const (
@@ -64,6 +65,13 @@ func Hash(s string) string {
 	hash := sha256.Sum256([]byte(s))
 
 	return hex.EncodeToString(hash[:])
+}
+
+// HashURL returns the hash of a normalized URL. It is used to build the
+// pagereports, links and hreflangs graphs so URLs that differ only in
+// scheme or host case, default port or fragment resolve to the same node.
+func HashURL(s string) string {
+	return Hash(urlutils.NormalizeURL(s))
 }
 
 // Truncate a string to the requiered length.

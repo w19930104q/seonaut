@@ -7,6 +7,7 @@ import (
 	"net/url"
 
 	"github.com/stjudewashere/seonaut/internal/models"
+	"github.com/stjudewashere/seonaut/internal/urlutils"
 )
 
 type PageReportRepository struct {
@@ -16,10 +17,10 @@ type PageReportRepository struct {
 // Save a pagereport and all its related data to the database. Once the pagereport is saved it uses its id to
 // save the associated links, external_links, images, scripts and so on.
 func (ds *PageReportRepository) SavePageReport(r *models.PageReport, cid int64) (*models.PageReport, error) {
-	urlHash := Hash(r.URL)
+	urlHash := HashURL(r.URL)
 	var redirectHash string
 	if r.RedirectURL != "" {
-		redirectHash = Hash(r.RedirectURL)
+		redirectHash = HashURL(r.RedirectURL)
 	}
 
 	query := `
@@ -127,7 +128,7 @@ func (ds *PageReportRepository) SavePageReportLinks(r *models.PageReport, cid in
 	sqlString := "INSERT INTO links (pagereport_id, crawl_id, url, scheme, rel, nofollow, text, url_hash) values "
 	v := []interface{}{}
 	for _, l := range r.Links {
-		hash := Hash(l.URL)
+		hash := HashURL(l.URL)
 		sqlString += "(?, ?, ?, ?, ?, ?, ?, ?),"
 		v = append(v, r.Id, cid, l.URL, l.ParsedURL.Scheme, l.Rel, l.NoFollow, Truncate(l.Text, 1024), hash)
 	}
@@ -173,9 +174,11 @@ func (ds *PageReportRepository) SavePageReportHreflangs(r *models.PageReport, ci
 
 	sqlString := "INSERT INTO hreflangs (pagereport_id, crawl_id, from_lang, to_url, to_lang, from_hash, to_hash) values "
 	v := []interface{}{}
+	fromHash := HashURL(r.URL)
 	for _, h := range r.Hreflangs {
+		toURL := urlutils.NormalizeURL(h.URL)
 		sqlString += "(?, ?, ?, ?, ?, ?, ?),"
-		v = append(v, r.Id, cid, r.Lang, h.URL, h.Lang, Hash(r.URL), Hash(h.URL))
+		v = append(v, r.Id, cid, r.Lang, toURL, models.NormalizeLang(h.Lang), fromHash, HashURL(toURL))
 	}
 	sqlString = sqlString[0 : len(sqlString)-1]
 	stmt, _ := ds.DB.Prepare(sqlString)
@@ -912,7 +915,7 @@ func (ds *PageReportRepository) FindInLinks(s string, cid int64, p int) []models
 	max := paginationMax
 	offset := max * (p - 1)
 
-	hash := Hash(s)
+	hash := HashURL(s)
 	query := `
 		SELECT
 			pagereports.id,
@@ -950,7 +953,7 @@ func (ds *PageReportRepository) FindInLinks(s string, cid int64, p int) []models
 func (ds *PageReportRepository) FindPageReportsRedirectingToURL(u string, cid int64, p int) []models.PageReport {
 	max := paginationMax
 	offset := max * (p - 1)
-	uh := Hash(u)
+	uh := HashURL(u)
 	query := `
 		SELECT
 			id,
@@ -1021,7 +1024,7 @@ func (ds *PageReportRepository) GetNumberOfPagesForExternalLinks(pageReport *mod
 // GetNumberOfPagesForInlinks returns the total number of pages of in links for an specific PageReport.
 // this method is used to build a paginator of in links.
 func (ds *PageReportRepository) GetNumberOfPagesForInlinks(pageReport *models.PageReport, cid int64) int {
-	h := Hash(pageReport.URL)
+	h := HashURL(pageReport.URL)
 	query := `
 		SELECT 
 			count(pagereports.id)
@@ -1042,7 +1045,7 @@ func (ds *PageReportRepository) GetNumberOfPagesForInlinks(pageReport *models.Pa
 // GetNumberOfPagesForRedirecting returns the total number of pages of redirects for an specific PageReport.
 // this method is used to build a paginator of redirects.
 func (ds *PageReportRepository) GetNumberOfPagesForRedirecting(pageReport *models.PageReport, cid int64) int {
-	h := Hash(pageReport.URL)
+	h := HashURL(pageReport.URL)
 	query := `
 		SELECT
 			count(id)
